@@ -1,2 +1,14 @@
-package com.thingspire.thingspire.user.repository;public class MemberRepository {
+package com.thingspire.thingspire.user.repository;
+
+import com.thingspire.thingspire.user.Member;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface MemberRepository extends JpaRepository<Member, Long> {
+    Optional <Member> findByEmail(String email);
+    Optional<Member> findByName(String name);
+    Optional<Member> findByLoginId(String loginId);
 }

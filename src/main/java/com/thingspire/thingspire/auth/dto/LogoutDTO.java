@@ -1,4 +1,4 @@
-package com.thingspire.thingspire.auth.jwt.dto;
+package com.thingspire.thingspire.auth.dto;
 
 import lombok.Getter;
 
