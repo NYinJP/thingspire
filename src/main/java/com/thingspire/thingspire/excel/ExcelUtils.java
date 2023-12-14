@@ -8,11 +8,14 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -25,13 +28,14 @@ import java.util.stream.Collectors;
 @Component
 public class ExcelUtils implements ExcelUtilMethodFactory {
     @Override
-    public void auditExcelDownload(List<AuditDTO> data, HttpServletResponse response) {
+    public void auditExcelDownload(List<AuditDTO> data, LocalDateTime searchStartDate , LocalDateTime searchEndDate, HttpServletResponse response) {
         Workbook workbook = getXSSFWorkBook();
         Sheet sheet = workbook.createSheet("첫 번째 시트");
         Cell cell = null;
         Row row = null;
         List<String> excelHeaderList = getHeaderName(getClass(data));
         row = sheet.createRow(0);
+        List<AuditDTO> filteredData = filterDataByDate(data, searchStartDate, searchEndDate);
         for(int i=0; i<excelHeaderList.size(); i++) {
 
             // 열을 만들어준다.
@@ -41,13 +45,15 @@ public class ExcelUtils implements ExcelUtilMethodFactory {
             cell.setCellValue(excelHeaderList.get(i));
         }
 
-        renderAuditExcelBody(data, sheet, row, cell);
+        renderAuditExcelBody(filteredData, sheet, row, cell);
 
         DateTimeFormatter fileNameFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HH:mm:ss");
         String currentDateTime = LocalDateTime.now().format(fileNameFormatter);
 
+        // response에 UTF-8 설정 추가
+        response.setCharacterEncoding("UTF-8");
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        response.setHeader("Content-Disposition", "attachment;filename = Audit_" + currentDateTime + ".xlsx");
+        response.setHeader("Content-Disposition", "attachment;filename = Audit " + currentDateTime + ".xlsx");
 
         try {
             // 엑셀 파일을 다운로드 하기 위해 write() 메서드를 사용한다.
@@ -62,6 +68,12 @@ public class ExcelUtils implements ExcelUtilMethodFactory {
             closeWorkBook(workbook);
         }
     }
+    // startDate와 endDate에 따라 데이터를 필터링하는 로직 추가
+    private List<AuditDTO> filterDataByDate(List<AuditDTO> data, LocalDateTime searchStartDate, LocalDateTime searchEndDate) {
+        return data.stream()
+                .filter(audit -> audit.getActivityTime().isAfter(searchStartDate) && audit.getActivityTime().isBefore(searchEndDate))
+                .collect(Collectors.toList());
+    }
 
     @Override
     public void renderAuditExcelBody(List<AuditDTO> data, Sheet sheet, Row row, Cell cell) {
@@ -69,7 +81,12 @@ public class ExcelUtils implements ExcelUtilMethodFactory {
         for (AuditDTO audit : data) {
             row = sheet.createRow(rowCount++);
             row.createCell(0).setCellValue(audit.getId());
-            row.createCell(1).setCellValue(audit.getActivityTime());
+
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd hh:mm:ss a");
+            String formattedDateTime = audit.getActivityTime().format(formatter);
+            row.createCell(1).setCellValue(formattedDateTime);
+            // row.createCell(1).setCellValue(audit.getActivityTime().toString());
+
             row.createCell(2).setCellValue(audit.getLoginId());
             row.createCell(3).setCellValue(audit.getName());
             row.createCell(4).setCellValue(audit.getActivityType());
@@ -101,6 +118,7 @@ public class ExcelUtils implements ExcelUtilMethodFactory {
 
         return excelHeaderNameList;
     }
+
     private Class<?> getClass(List<?> data) {
         // List가 비어있지 않다면 List가 가지고 있는 모든 DTO는 같은 필드를 가지고 있으므로,
         // 맨 마지막 DTO만 빼서 클래스 정보를 반환한다.

@@ -28,15 +28,25 @@ public class MemberDetailService implements UserDetailsService {
         this.authorityUtils = authorityUtils;
     }
 
+    /*
+        loadUserByUsername 메서드
+
+        Spring Security에서 사용자 정보를 가져오는 UserDetailsService의 구현체 중 하나입니다.
+        사용자의 로그인 아이디를 가져와서('loginId') 해당 사용자의 상세정보를 반환하는 역할을 합니다.
+
+    */
+
     @Override
     public UserDetails loadUserByUsername(String loginId) throws UsernameNotFoundException {
         Optional<Member> optionalMember = memberRepository.findByLoginId(loginId);
         Member findMember = optionalMember.orElseThrow(() -> new BusinessLogicException(ExceptionCode.MEMBER_NOT_FOUND));
+//        Member findMember = optionalMember.orElseThrow(() -> new UsernameNotFoundException("User not found with login ID: " + loginId));
 
-        // 아이디 오류
-        if(!findMember.getLoginId().equals(loginId)){
-            throw new BusinessLogicException(ExceptionCode.LOGIN_ID_FAILED);
-        } return new MemberDetails(findMember);
+//        // 아이디 오류
+//        if(!findMember.getLoginId().equals(loginId)){
+//            throw new BusinessLogicException(ExceptionCode.LOGIN_ID_FAILED);
+//        }
+        return new MemberDetails(findMember);
     }
 
     //MemberDetails 클래스 추가
@@ -56,7 +66,6 @@ public class MemberDetailService implements UserDetailsService {
             setDepartment(member.getDepartment());
             setAuthority(member.getAuthority());
             setFactoryCode(member.getFactoryCode());
-
         }
 
         @Override

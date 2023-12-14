@@ -3,7 +3,6 @@ package com.thingspire.thingspire.auth.handler;
 
 import com.thingspire.thingspire.audit.Audit;
 import com.thingspire.thingspire.audit.AuditRepository;
-import com.thingspire.thingspire.audit.LoginLoggable;
 import com.thingspire.thingspire.auth.service.MemberDetailService;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;

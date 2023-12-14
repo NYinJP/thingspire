@@ -2,15 +2,14 @@ package com.thingspire.thingspire.auth.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thingspire.thingspire.audit.AuditRepository;
-import com.thingspire.thingspire.audit.LoginLoggable;
 import com.thingspire.thingspire.auth.dto.LoginDTO;
 import com.thingspire.thingspire.auth.filter.JwtAuthenticationFilter;
 import com.thingspire.thingspire.auth.filter.JwtVerificationFilter;
 import com.thingspire.thingspire.auth.handler.*;
 import com.thingspire.thingspire.auth.jwt.JwtTokenizer;
 import com.thingspire.thingspire.auth.utils.CustomAuthorityUtils;
-import com.thingspire.thingspire.redis.RedisUtil;
 import com.thingspire.thingspire.user.repository.MemberRepository;
+import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -40,7 +39,7 @@ public class SecurityConfiguration {
     private final MemberRepository memberRepository;
     private final AuditRepository auditRepository;
     private final LoginDTO loginDTO;
-    private final RedisUtil redisUtil;
+    private final CacheManager cacheManager;
 
 //    public SecurityConfiguration(JwtTokenizer jwtTokenizer, CustomAuthorityUtils authorityUtils, CustomAuthorityUtils customAuthorityUtils, MemberRepository memberRepository, AuditRepository auditRepository, LoginDTO loginDTO) {
 //        this.jwtTokenizer = jwtTokenizer;
@@ -51,14 +50,24 @@ public class SecurityConfiguration {
 //        this.loginDTO = loginDTO;
 //    }
 
-    public SecurityConfiguration(JwtTokenizer jwtTokenizer, CustomAuthorityUtils authorityUtils, CustomAuthorityUtils customAuthorityUtils, MemberRepository memberRepository, AuditRepository auditRepository, LoginDTO loginDTO, RedisUtil redisUtil) {
+//    public SecurityConfiguration(JwtTokenizer jwtTokenizer, CustomAuthorityUtils authorityUtils, CustomAuthorityUtils customAuthorityUtils, MemberRepository memberRepository, AuditRepository auditRepository, LoginDTO loginDTO ) {
+//        this.jwtTokenizer = jwtTokenizer;
+//        this.authorityUtils = authorityUtils;
+//        this.customAuthorityUtils = customAuthorityUtils;
+//        this.memberRepository = memberRepository;
+//        this.auditRepository = auditRepository;
+//        this.loginDTO = loginDTO;
+//    }
+
+
+    public SecurityConfiguration(JwtTokenizer jwtTokenizer, CustomAuthorityUtils authorityUtils, CustomAuthorityUtils customAuthorityUtils, MemberRepository memberRepository, AuditRepository auditRepository, LoginDTO loginDTO, CacheManager cacheManager) {
         this.jwtTokenizer = jwtTokenizer;
         this.authorityUtils = authorityUtils;
         this.customAuthorityUtils = customAuthorityUtils;
         this.memberRepository = memberRepository;
         this.auditRepository = auditRepository;
         this.loginDTO = loginDTO;
-        this.redisUtil = redisUtil;
+        this.cacheManager = cacheManager;
     }
 
     @Bean
@@ -117,24 +126,15 @@ public class SecurityConfiguration {
 
             AuthenticationManager authenticationManager = builder.getSharedObject(AuthenticationManager.class);
 
-            JwtAuthenticationFilter jwtAuthenticationFilter = new JwtAuthenticationFilter(authenticationManager, jwtTokenizer);  // (2-4)
+            JwtAuthenticationFilter jwtAuthenticationFilter = new JwtAuthenticationFilter(authenticationManager, jwtTokenizer, cacheManager);  // (2-4)
             jwtAuthenticationFilter.setFilterProcessesUrl("/api/login");
             jwtAuthenticationFilter.setAuthenticationSuccessHandler(new MemberAuthenticationSuccessHandler(auditRepository));
             jwtAuthenticationFilter.setAuthenticationFailureHandler(new MemberAuthenticationFailureHandler(auditRepository));
 
-            JwtVerificationFilter jwtVerificationFilter = new JwtVerificationFilter(jwtTokenizer, authorityUtils, redisUtil);
+            JwtVerificationFilter jwtVerificationFilter = new JwtVerificationFilter(jwtTokenizer, authorityUtils);
 
             builder.addFilter(jwtAuthenticationFilter)
-                    .addFilterAfter(jwtVerificationFilter, JwtAuthenticationFilter.class)
-                    .logout()
-                    .logoutUrl("/api/logout")
-                    .logoutSuccessHandler((request, response, authentication) -> {})
-                    .addLogoutHandler(memberLogoutHandler())
-                    .permitAll();
-        }
-        @Bean
-        public MemberLogoutHandler memberLogoutHandler() {
-            return new MemberLogoutHandler(jwtTokenizer, redisUtil);
+                    .addFilterAfter(jwtVerificationFilter, JwtAuthenticationFilter.class);
         }
     }
 }

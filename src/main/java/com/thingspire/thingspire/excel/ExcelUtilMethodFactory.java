@@ -9,10 +9,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface ExcelUtilMethodFactory {
-    void auditExcelDownload(List<AuditDTO> data, HttpServletResponse response);
+    void auditExcelDownload(List<AuditDTO> data, LocalDateTime searchStartDate, LocalDateTime searchEndDate, HttpServletResponse response);
 
     void renderAuditExcelBody(List<AuditDTO> data, Sheet sheet, Row row, Cell cell);
 }

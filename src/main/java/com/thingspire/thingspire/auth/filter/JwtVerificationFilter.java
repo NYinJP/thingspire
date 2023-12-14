@@ -4,12 +4,15 @@ import com.thingspire.thingspire.audit.Audit;
 import com.thingspire.thingspire.audit.AuditRepository;
 import com.thingspire.thingspire.auth.jwt.JwtTokenizer;
 import com.thingspire.thingspire.auth.utils.CustomAuthorityUtils;
+import com.thingspire.thingspire.auth.utils.ErrorResponder;
 import com.thingspire.thingspire.exception.BusinessLogicException;
 import com.thingspire.thingspire.exception.ExceptionCode;
-import com.thingspire.thingspire.redis.RedisUtil;
+import com.thingspire.thingspire.response.ErrorResponse;
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -29,7 +32,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
-import static com.thingspire.thingspire.auth.handler.MemberLogoutHandler.extractTokenFromRequest;
+import static com.thingspire.thingspire.auth.utils.ErrorResponder.sendErrorResponse;
+
 
 /*
 클라이언트 측에서 전송된 request header에 포함된 JWT에 대해 검증 작업을 수행하는 클래스
@@ -38,12 +42,10 @@ import static com.thingspire.thingspire.auth.handler.MemberLogoutHandler.extract
 public class JwtVerificationFilter extends OncePerRequestFilter {  // (1)
     private final JwtTokenizer jwtTokenizer;
     private final CustomAuthorityUtils authorityUtils;
-    private final RedisUtil redisUtil;
 
-    public JwtVerificationFilter(JwtTokenizer jwtTokenizer, CustomAuthorityUtils authorityUtils, RedisUtil redisUtil) {
+    public JwtVerificationFilter(JwtTokenizer jwtTokenizer, CustomAuthorityUtils authorityUtils) {
         this.jwtTokenizer = jwtTokenizer;
         this.authorityUtils = authorityUtils;
-        this.redisUtil = redisUtil;
     }
 
     // (2)
@@ -57,27 +59,54 @@ public class JwtVerificationFilter extends OncePerRequestFilter {  // (1)
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException, ServletException, IOException {
         try {
-            String token = extractTokenFromRequest(request);
+            String requestUri = request.getRequestURI();
+            log.info("#### 현재 요청 URL :" + requestUri);
 
-            // 블랙리스트 확인
-            if (redisUtil.hasKeyBlackList(token)) {
-                // 블랙리스트에 등재된 토큰인 경우, 예외를 발생시켜 검증 실패 처리
-                throw new BadCredentialsException("The token is blacklisted");
-            }
             Map<String, Object> claims = verifyJws(request);
             setAuthenticationToContext(claims);
-        }catch(SignatureException se) { // 서명 검증 실패
+            filterChain.doFilter(request, response);
+
+        } catch (SignatureException se) { // 서명 검증 실패
+
+            String requestUri = request.getRequestURI();
+
             log.info("Invalid JWT signature.");
             request.setAttribute("exception", se);
-        }catch (ExpiredJwtException ee) {
+
+            if (requestUri.equals("/api/authentication/token")) { // refreshToken 검증 오류
+                sendErrorResponse(response, HttpStatus.UNAUTHORIZED, "Invalid JWT signature");
+            } else { // accessToken 검증 오류
+                sendErrorResponse(response, HttpStatus.UNAUTHORIZED, "Invalid JWT signature");
+            }
+
+
+        } catch (ExpiredJwtException ee) { // JWT 토큰 만료!
+            String requestUri = request.getRequestURI();
+
             log.info("Expired JWT token.");
             request.setAttribute("exception", ee);
-        } catch (Exception e) {
-            request.setAttribute("exception", e);
-        }
 
-        filterChain.doFilter(request, response);
+            if (requestUri.equals("/api/authentication/token")) { // refreshToken 검증 오류
+                sendErrorResponse(response, HttpStatus.PAYMENT_REQUIRED, "Request failed with status code 402");
+            } else { // accessToken 검증 오류
+                sendErrorResponse(response, HttpStatus.UNAUTHORIZED, "Request failed with status code 401");
+            }
+
+        } catch (Exception e) {
+            String requestUri = request.getRequestURI();
+            request.setAttribute("exception", e);
+
+            if (requestUri.equals("/api/authentication/token")) { // refreshToken 검증 오류
+                sendErrorResponse(response, HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred");
+            } else { // accessToken 검증 오류
+                sendErrorResponse(response, HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred");
+            }
+
+        }
     }
+
+
+
 
     // (6)
     @Override

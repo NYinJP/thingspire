@@ -33,6 +33,7 @@ public class CustomAuthorityUtils {
         return USER_ROLES_STRING;
     }
 
+    //TODO : 다음주에 고칠것.
     public List<GrantedAuthority> createAuthorities(List<String> roles) {
         List<GrantedAuthority> authorities = roles.stream()
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role)) // (2)

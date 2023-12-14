@@ -48,8 +48,10 @@ public class MemberAuthenticationFailureHandler implements AuthenticationFailure
 
 
         String errorMessage;
-        if (exception instanceof BadCredentialsException || exception instanceof InternalAuthenticationServiceException) {
-            errorMessage = "아이디 또는 비밀번호가 맞지 않습니다.";
+        if (exception instanceof BadCredentialsException) {
+            errorMessage = "비밀번호가 맞지 않습니다.";
+        } else if (exception instanceof InternalAuthenticationServiceException) {
+            errorMessage= "등록되지 않은 아이디거나 아이디를 잘못 입력했습니다.";
         } else if (exception instanceof UsernameNotFoundException) {
             errorMessage = "계정이 존재하지 않습니다.";
         } else if (exception instanceof AuthenticationCredentialsNotFoundException) {
@@ -58,36 +60,8 @@ public class MemberAuthenticationFailureHandler implements AuthenticationFailure
             errorMessage = "알 수 없는 이유로 로그인에 실패하였습니다. 관리자에게 문의하세요.";
         }
 
-
         // 인증 실패 시, 에러 로그를 기록하거나 error response를 전송할 수 있다.
         log.error("# Authentication failed: {}", exception.getMessage());
-
-//        ObjectMapper obj = new ObjectMapper();
-//        loginDTO = obj.readValue(request.getInputStream(), LoginDTO.class);
-
-        String name = request.getParameter("username");
-        System.out.println(name);
-
-        Audit audit = new Audit();
-
-        if (exception instanceof BadCredentialsException) {
-            BadCredentialsException badCredentialsException = (BadCredentialsException) exception;
-            String message = badCredentialsException.getMessage();
-
-            String username = request.getParameter("username"); //null값임
-            log.info("@@@@@@@@@@@ : " + username);
-//            String username = (String) authentication.getPrincipal();
-//            String password = (String) authentication.getCredentials();
-            audit.setLoginId(message);
-            audit.setName(message);
-        }
-
-        audit.setActivityType("로그인");
-        audit.setDetail("사용자 로그인");
-        audit.setActivityTime(LocalDateTime.now());
-
-        audit.setSuccess("실패");
-        auditRepository.save(audit);
 
         sendErrorResponse(response, errorMessage);  // (2)
 

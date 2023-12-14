@@ -1,5 +1,6 @@
 package com.thingspire.thingspire.audit;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.*;
 
 import javax.persistence.Entity;
@@ -19,6 +20,7 @@ public class Audit {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     // 실행 시간
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Seoul")
     private LocalDateTime activityTime;
     // 로그인 아이디
     private String loginId;

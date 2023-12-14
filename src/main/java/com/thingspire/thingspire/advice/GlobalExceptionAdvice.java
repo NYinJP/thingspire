@@ -3,6 +3,7 @@ package com.thingspire.thingspire.advice;
 import com.thingspire.thingspire.audit.Audit;
 import com.thingspire.thingspire.audit.AuditRepository;
 import com.thingspire.thingspire.exception.BusinessLogicException;
+import com.thingspire.thingspire.exception.PasswordInputException;
 import com.thingspire.thingspire.response.ErrorResponse;
 import com.thingspire.thingspire.user.Member;
 import com.thingspire.thingspire.user.MemberService;
@@ -11,15 +12,19 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import javax.validation.ConstraintViolationException;
+import java.nio.file.AccessDeniedException;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 
 @Slf4j
@@ -78,6 +83,16 @@ public class GlobalExceptionAdvice {
                 .getStatus()));
     }
 
+    @ExceptionHandler(PasswordInputException.class)
+    public ResponseEntity<List<ErrorResponse>> handlePasswordInputExcepgion(PasswordInputException e) {
+        System.out.println("에러 메시지입니다 : " + e.getExceptionCode().getMessage());
+        final ErrorResponse response = ErrorResponse.of(e.getExceptionCode());
+        List<ErrorResponse> responseList = Collections.singletonList(response);
+
+        return new ResponseEntity<>(responseList, HttpStatus.valueOf(e.getExceptionCode().getStatus()));
+    }
+
+
     @ExceptionHandler
     @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
     public ErrorResponse handleHttpRequestMethodNotSupportedException(
@@ -109,4 +124,30 @@ public class GlobalExceptionAdvice {
 
         return response;
     }
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDeniedException(AccessDeniedException e) {
+        System.out.println("에러 메시지입니다 : " + e.getMessage());
+        final ErrorResponse response = ErrorResponse.of(HttpStatus.UNAUTHORIZED,e.getMessage());
+
+        return new ResponseEntity<>(response, HttpStatus.UNAUTHORIZED);
+    }
+
+//    @ExceptionHandler(AuthenticationException.class)
+//    public ResponseEntity<ErrorResponse> handleAuthenticationException(AuthenticationException e) {
+//        System.out.println("에러 메시지입니다 : " + e.getMessage());
+//        final ErrorResponse response = ErrorResponse.of(HttpStatus.UNAUTHORIZED,e.getMessage());
+//
+//        return new ResponseEntity<>(response, HttpStatus.UNAUTHORIZED);
+//    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ResponseEntity<ErrorResponse> handleAuthenticationException2(AuthenticationException e) {
+        String errorMessage = e.getMessage(); // 예외에서 메시지 가져오기
+        log.warn("Authentication failed: {}", errorMessage);
+
+        ErrorResponse response = ErrorResponse.of(HttpStatus.UNAUTHORIZED, errorMessage);
+        return new ResponseEntity<>(response, HttpStatus.UNAUTHORIZED);
+    }
+
 }

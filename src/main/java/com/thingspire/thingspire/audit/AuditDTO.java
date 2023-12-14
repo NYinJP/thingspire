@@ -1,5 +1,6 @@
 package com.thingspire.thingspire.audit;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.thingspire.thingspire.excel.ExcelColumnName;
 import lombok.*;
 

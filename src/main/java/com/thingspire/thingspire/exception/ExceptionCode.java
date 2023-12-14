@@ -10,9 +10,12 @@ public enum ExceptionCode {
     LOGIN_ID_FAILED(400, "잘못된 로그인 아이디입니다"),
     JWT_TOKEN_UNAUTHORIZED(400, "JWT 토큰이 유효하지 않습니다"),
     Email_NOT_VALID(400, "이메일 정보가 유효하지 않습니다"),
-    PASSWORD_NOT_SAME(400, "비밀번호가 같지 않습니다"),
+    PASSWORD_IS_SAME(400, "바꿀 비밀번호가 이전 비밀번호와 같습니다."),
     WRONG_EMAIL_ADDRESS(400, "잘못된 이메일 정보입니다"),
-    MEMBERID_NOT_VALID(400,"회원 아이디가 유효하지 않습니다");
+    MEMBERID_NOT_VALID(400,"회원 아이디가 유효하지 않습니다"),
+    PASSWORD_EMPTY(400, "입력 패스워드가 없습니다."),
+    REFRESHTOKEN_NOT_SAME(400, "리프레시 토큰 값이 다릅니다."),
+    REFRESHTOKEN_NOT_VALID(402, "Request failed with status code 402");
 
 
     @Getter

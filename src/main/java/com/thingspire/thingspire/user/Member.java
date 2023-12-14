@@ -85,4 +85,17 @@ public class Member extends BaseEntity implements Serializable {
     // "elec" 혹은 "solar" 으로 저장
     @Column
     private String departmentType;
+
+    // 엔티티가 삭제되기 직전에 수행됩니다. 일반적으로 값을 반환하지 않습니다.
+//    @PreRemove
+//    private void beforeRemove() {
+//        System.out.println("Member is about to be removed...");
+//
+//
+//
+//    }
+//
+//    public String getDeletedMemberName() {
+//        return deletedMemberName;
+//    }
 }

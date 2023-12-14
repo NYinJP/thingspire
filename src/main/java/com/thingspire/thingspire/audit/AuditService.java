@@ -34,9 +34,14 @@ public class AuditService {
         Member authMember = memberService.getAuthenticationMember();
         checkAdminAuthority(authMember);
 
-        return auditRepository.findByActivityTimeBetween(fromDate, toDate);
+        return auditRepository.findByActivityTimeBetweenOrderByActivityTimeDesc(fromDate, toDate);
     }
+    public List<Audit> findAuditsByLoginIdAndDateRange(String LoginId, LocalDateTime fromDate, LocalDateTime toDate) {
+        Member authMember = memberService.getAuthenticationMember();
+        checkAdminAuthority(authMember);
 
+        return auditRepository.findByLoginIdAndActivityTimeBetweenOrderByActivityTimeDesc(LoginId, fromDate, toDate);
+    }
     private void checkAdminAuthority(Member authMember) {
         if (!authMember.getAuthority().equals("Admin")) {
             throw new BusinessLogicException(ExceptionCode.MEMBER_UNAUTHORIZED);

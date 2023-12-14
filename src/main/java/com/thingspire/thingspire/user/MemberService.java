@@ -1,9 +1,13 @@
 package com.thingspire.thingspire.user;
 
+import com.thingspire.thingspire.audit.Audit;
+import com.thingspire.thingspire.audit.AuditRepository;
+import com.thingspire.thingspire.audit.ErrorLoggable;
 import com.thingspire.thingspire.audit.Loggable;
 import com.thingspire.thingspire.auth.utils.CustomAuthorityUtils;
 import com.thingspire.thingspire.exception.BusinessLogicException;
 import com.thingspire.thingspire.exception.ExceptionCode;
+import com.thingspire.thingspire.exception.PasswordInputException;
 import com.thingspire.thingspire.user.dto.MemberDTO;
 import com.thingspire.thingspire.user.repository.MemberRepository;
 import lombok.Getter;
@@ -12,16 +16,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.core.Authentication;
-
-import org.springframework.transaction.annotation.Transactional;
-
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,22 +32,25 @@ public class MemberService {
     private final MemberRepository memberRepository;
     private final PasswordEncoder passwordEncoder;
     private final CustomAuthorityUtils authorityUtils;
+    private final AuditRepository auditRepository;
 
     // 생성자 DI
     public MemberService(
             MemberRepository memberRepository,
             PasswordEncoder passwordEncoder,
-            CustomAuthorityUtils authorityUtils)
+            CustomAuthorityUtils authorityUtils,
+            AuditRepository auditRepository)
     {
         this.memberRepository = memberRepository;
         this.passwordEncoder = passwordEncoder;
         this.authorityUtils = authorityUtils;
+        this.auditRepository = auditRepository;
     }
     @Getter
     @Value("${password.reset}")
     private String resetPassword;
 
-    @Loggable
+    @ErrorLoggable
     /*
         회원 생성
 
@@ -61,10 +64,15 @@ public class MemberService {
 
         // 로그인 아이디 중복 검사. 이메일 중복 검사. 관리자 권한 검사
         verifyExistLoginId(member.getLoginId());
-        verifyExistEmail(member.getEmail());
+
+        // 이메일(선택사항) 값이 들어오면 중복인지 아닌지 확인
+        if (member.getEmail() != null && !member.getEmail().equals("")) {
+            verifyExistEmail(member.getEmail());
+        }
 
         // 로그인 사용자 정보 가져오기
         Member authMember = getAuthenticationMember();
+
         member.setCreatedBy(authMember.getName());
         member.setModifiedBy(authMember.getName());
         isAdmin(authMember.getAuthority());
@@ -77,12 +85,16 @@ public class MemberService {
 
         member.setRoles(roles);
         member.setActivated(true);
+        member.setAuthority(member.getAuthority());
 
         // 회원 가입에 성공하면 로그 출력
         log.info("###############################################");
         log.info("### 계정 명 :{} 님 께서 회원가입 하셨습니다. ###",member.getEmail());
         log.info("### 해당 계정( {} )은 {} 권한입니다. ###",member.getEmail(), member.getRoles().get(0));
         log.info("###############################################");
+
+
+        logCreateAction(member,authMember);
 
         return memberRepository.save(member);
     }
@@ -93,14 +105,14 @@ public class MemberService {
         관리자 혹은 사용자의 회원 정보 수정
         부서, 전화번호 변경 가능
     */
-    @Loggable
+    @ErrorLoggable
     public Member updateMember(Member member){
         Member findMember = findVerifiedMember(member.getMemberId());
 
         // 로그인 한 정보
         Member authMember = getAuthenticationMember();
 
-        if (authMember.getAuthority().equals("User")) { // 사용자 정보 수정
+        if (authMember.getAuthority().equals("User")) { // 사용자가 자신의 정보 수정
             Optional.ofNullable(member.getPhoneNumber())
                     .ifPresent(phoneNumber -> findMember.setPhoneNumber(phoneNumber)); // 전화번호
             Optional.ofNullable(member.getLoginId())
@@ -110,7 +122,8 @@ public class MemberService {
 
             findMember.setModifiedBy(authMember.getName());
         }
-        else{ // 관리자 수정
+        else{ // 관리자가 다른 사용자의 정보 수정
+
             Optional.ofNullable(member.getDepartment())
                     .ifPresent(department -> { // 회사명
                         findMember.setDepartment(department);
@@ -134,12 +147,12 @@ public class MemberService {
 
         }
         if((findMember.getMemberId() == authMember.getMemberId()) || authMember.getAuthority().equals("Admin")){
+            logUpdateAction(findMember, authMember);
             return memberRepository.save(findMember);
 //            return findMember;
-        }else{
+        }else {
             throw new BusinessLogicException(ExceptionCode.MEMBER_UNAUTHORIZED);
         }
-
     }
 
     /*
@@ -149,6 +162,8 @@ public class MemberService {
         헤더토큰에 관리자 권한이 있는 사람만 삭제 가능하다.
         조회한 회원 ID가 유효하지 않을 시. 사용자가 삭제할 시.
         Audit 실패 log 기록.
+
+        사용 안하는 듯...!
      */
     @Loggable
     public void deleteMember(long memberId) {
@@ -168,15 +183,26 @@ public class MemberService {
         체크박스로 표시한 회원 여러명 한꺼번에 삭제!
         헤더토큰에 관리자 권한이 있는 사람만 삭제 가능하다.
         조회한 회원 ID들이 유효하지 않거나, 사용자(User)가 삭제하면 에러
+
     */
-    @Loggable
+    @ErrorLoggable
     public void deleteMembers(List<Long>memberIds) {
         Member loginMember = getAuthenticationMember();
 
         if (loginMember.getAuthority().equals("Admin")) { // 관리자 권한
             for (Long memberId : memberIds) {
                 try {
-                    memberRepository.deleteById(memberId);
+                    Optional<Member> optionalMember = memberRepository.findById(memberId);
+                    if (optionalMember.isPresent()) {
+                        Member deletedMember = optionalMember.get();
+
+                        // 회원 삭제 log 남기기
+                        logDeleteAction(deletedMember, loginMember);
+
+                        memberRepository.deleteById(memberId);
+                    } else {
+                        throw new EmptyResultDataAccessException(1);
+                    }
                 } catch (EmptyResultDataAccessException e) {
                     throw new BusinessLogicException(ExceptionCode.MEMBERID_NOT_VALID);
                 }
@@ -186,6 +212,100 @@ public class MemberService {
         }
 
     }
+
+    // 회원 삭제 log
+    private void logDeleteAction(Member logDeletedMember, Member loginMember) {
+        log.info("Member is about to be removed ...");
+        Audit audit = new Audit();
+        audit.setActivityTime(LocalDateTime.now()); // 실행 시간
+        audit.setLoginId(loginMember.getLoginId()); // 관리자 로그인 아이디
+        audit.setName(loginMember.getName()); // 관리자 이름
+        audit.setActivityType("계정관리"); // 활동 종류
+
+        if (logDeletedMember.getAuthority().equals("Admin")) {
+            audit.setDetail("아이디 \"" +logDeletedMember.getLoginId()+"\" 계정 삭제"); // 사용자 누구 삭제했는지?
+        } else {
+            audit.setDetail("아이디 \""+logDeletedMember.getLoginId() + "\" 계정 삭제"); // 사용자 누구 삭제했는지??
+        }
+        audit.setSuccess("성공");
+        auditRepository.save(audit);
+    }
+
+    // 회원 정보 수정 log <- 비밀번호 수정도 포함하기
+    private void logUpdateAction(Member logUpdatedMember, Member loginMember) {
+        log.info("Member is about to be updated...");
+        Audit audit = new Audit();
+        audit.setActivityTime(LocalDateTime.now());
+        audit.setLoginId(loginMember.getLoginId()); // 관리자 로그인 아이디
+        audit.setName(loginMember.getName()); // 관리자 이름
+        audit.setActivityType("계정관리"); // 활동 종류
+        if (logUpdatedMember.getAuthority().equals("Admin")) {
+            audit.setDetail("아이디 \"" +logUpdatedMember.getLoginId()+"\" 정보 수정"); // 사용자 누구 생성했는지?
+        } else {
+            audit.setDetail("아이디 \"" +logUpdatedMember.getLoginId()+"\" 정보 수정"); // 사용자 누구 업데이트했는지?
+        }
+        audit.setSuccess("성공");
+
+        auditRepository.save(audit);
+    }
+
+    // 회원 생성 log
+    private void logCreateAction(Member logCreatedMember, Member loginMember) {
+        log.info("Member is about to be created...");
+        Audit audit = new Audit();
+        audit.setActivityTime(LocalDateTime.now());
+        audit.setLoginId(loginMember.getLoginId()); // 관리자 로그인 아이디
+        audit.setName(loginMember.getName()); // 관리자 이름
+        audit.setActivityType("계정관리");
+        if (logCreatedMember.getAuthority().equals("Admin")) {
+            audit.setDetail("관리자 아이디 \"" +logCreatedMember.getLoginId()+"\" 계정 생성"); // 사용자 누구 생성했는지?
+        } else {
+            audit.setDetail("운영자 아이디 \"" +logCreatedMember.getLoginId()+"\" 계정 생성"); // 사용자 누구 생성했는지?
+        }
+        audit.setSuccess("성공");
+
+        auditRepository.save(audit);
+    }
+
+    // 비밀번호 초기화 log
+    private void logPasswordResetMember(Member logPasswordResetMember) {
+        log.info("Member's password is about to be updated...");
+        Audit audit = new Audit();
+        audit.setActivityTime(LocalDateTime.now());
+        //audit.setLoginId(loginMember.getLoginId()); // 관리자 로그인 아이디
+        //audit.setName(loginMember.getName()); // 관리자 이름
+        audit.setName("관리자");
+        audit.setLoginId("관리자");
+
+        audit.setActivityType("계정관리");
+
+        if (logPasswordResetMember.getAuthority().equals("Admin")) {
+            audit.setDetail("아이디 \"" + logPasswordResetMember.getLoginId() + "\" 비밀번호 초기화"); // 사용자 누구의 비밀번호 수정했는지?
+        } else {
+            audit.setDetail("아이디 \"" +logPasswordResetMember.getLoginId()+"\" 비밀번호 초기화"); // 사용자 누구의 비밀번호 수정했는지?
+        }
+        audit.setSuccess("성공");
+
+        auditRepository.save(audit);
+    }
+
+    // 비밀번호 수정 log
+    private void logPasswordPatchMember(Member logPasswordPatchMember, Member loginMember) {
+        log.info("Member's password is about to be updated...");
+        Audit audit = new Audit();
+        audit.setActivityTime(LocalDateTime.now());
+        audit.setLoginId(loginMember.getLoginId()); // 관리자 로그인 아이디
+        audit.setName(loginMember.getName()); // 관리자 이름
+        audit.setActivityType("계정관리");
+        if (logPasswordPatchMember.getAuthority().equals("Admin")) {
+            audit.setDetail("아이디 \"" + logPasswordPatchMember.getLoginId() + "\" 비밀번호 변경"); // 사용자 누구의 비밀번호 수정했는지?
+        } else {
+            audit.setDetail("아이디 \"" +logPasswordPatchMember.getLoginId()+"\" 비밀번호 변경"); // 사용자 누구의 비밀번호 수정했는지?
+        }
+        audit.setSuccess("성공");
+        auditRepository.save(audit);
+    }
+
     /*
         회원 개별 조회 기능
 
@@ -221,7 +341,8 @@ public class MemberService {
         if (!authMember.getAuthority().equals("Admin")) {
             throw new BusinessLogicException(ExceptionCode.MEMBER_UNAUTHORIZED);
         }
-        return memberRepository.findAll();
+        //return memberRepository.findAllByOrderByCreatedTimeDesc();
+        return memberRepository.findAllByOrderByCreatedAtAndModifiedTime();
     }
 
     /*
@@ -229,18 +350,39 @@ public class MemberService {
 
         관리자는 모두, 회원은 자신의 비밀번호만 변경할 수 있다.
     */
-    @Loggable
+    @ErrorLoggable
     public Member patchPassword(MemberDTO.PatchPassword memberPatchPasswordDTO) {
 
         Member findMember = findVerifiedMember(memberPatchPasswordDTO.getMemberId());
-        verifyPassword(memberPatchPasswordDTO.getNewPassword(), memberPatchPasswordDTO.getPasswordConfirm());
         Member loginMember = getAuthenticationMember();
+
         if(loginMember.getMemberId() == findMember.getMemberId() || loginMember.getAuthority().equals("Admin")){
-            String encodePassword = passwordEncoder.encode(memberPatchPasswordDTO.getNewPassword());
-            findMember.setPassword(encodePassword);
-            return memberRepository.save(findMember);
+            if (memberPatchPasswordDTO.getNewPassword() == null || memberPatchPasswordDTO.getNewPassword().equals("")) {
+                throw new PasswordInputException(ExceptionCode.PASSWORD_EMPTY);
+            }
+            else {
+
+                logPasswordPatchMember(findMember, loginMember);
+                String encodePassword = passwordEncoder.encode(memberPatchPasswordDTO.getNewPassword());
+                findMember.setPassword(encodePassword);
+                return memberRepository.save(findMember);}
+
         } else throw new BusinessLogicException(ExceptionCode.MEMBER_UNAUTHORIZED);
     }
+
+    // 로그인 필요 없음
+    @ErrorLoggable
+    public void resetPasswordOnlyMemberId(Long memberId) {
+
+        Member findMember = findVerifiedMember(memberId);
+
+        logPasswordResetMember(findMember);
+        findMember.setPassword(passwordEncoder.encode(resetPassword));
+
+        memberRepository.save(findMember);
+
+    }
+
 
     /*
         비밀번호 초기화(Reset)
@@ -251,21 +393,35 @@ public class MemberService {
         비밀번호가 없는 대신 이메일과 로그인 아이디를 가져오기로 한다.
         자신의 정보만 수정 가능
     */
-    @Loggable
+    @ErrorLoggable
     public Member resetPassword(MemberDTO.ResetPassword memberResetPasswordDTO) {
 
+        //Member loginMember = getAuthenticationMember();
+
+        // 유효한 회원 아이디인지 검사
         findVerifiedMemberId(memberResetPasswordDTO.getMemberId());
-        Member findMember = findVerifiedMember(memberResetPasswordDTO.getMemberId()); // memberId로 정보 가져오기
-        verifyValidLoginId(memberResetPasswordDTO.getLoginId()); // 유효한 로그인아이디?
-        verifyValidEmail(findMember.getEmail()); // 유효한 이메일?
-        // 이메일을 잘못 작성한 경우
-        if(!findMember.getEmail().equals(memberResetPasswordDTO.getEmail())) throw new BusinessLogicException(ExceptionCode.WRONG_EMAIL_ADDRESS);
-        findMember.setPassword( passwordEncoder.encode(resetPassword));
+        // 회원 아이디 기반으로 수정할 회원 가져오기
+        Member findMember = findVerifiedMember(memberResetPasswordDTO.getMemberId());
+        // 유효한 로그인아이디 인지 확인하기
+        //verifyValidLoginId(memberResetPasswordDTO.getLoginId());
+
+        // 관리자만 비밀번호 초기화 가능
+//        if (loginMember.getAuthority().equals("Admin")) {
+        logPasswordResetMember(findMember);
+        findMember.setPassword(passwordEncoder.encode(resetPassword));
         return memberRepository.save(findMember);
+//        } else {
+//            throw new BusinessLogicException(ExceptionCode.MEMBER_UNAUTHORIZED);
+//        }
     }
 
-
-
+    /*
+        로그인 아이디 중복 확인 API
+        결과가 true면 중복 아이디이다.
+    */
+    public boolean IsLoginIdAvailable(String loginId) {
+        return (memberRepository.findByLoginId(loginId).isPresent());
+    }
 
 
     // set factoryCode
@@ -276,7 +432,13 @@ public class MemberService {
         else if(department.equals("DH 글로벌")) return "dhg";
         else if(department.equals("재원산업(주)")) return "jw";
         else if(department.equals("(주)에스에프시")) return "sfc";
-        else return "jg"; // 진곡
+        else if(department.equals("다은 태양광")) return "de";
+        else return "jg"; // 진곡 태양광
+    }
+    // set departmentType
+    private String setDepartmentType(String department) {
+        if(department.equals("진곡 태양광") || department.equals("다은 태양광")) return "solar";
+        else return "elec";
     }
 
     // Valid Member Check Method
@@ -330,7 +492,7 @@ public class MemberService {
     }
 
     private void verifyPassword(String password1, String password2) {
-        if(!password1.equals(password2)) throw new BusinessLogicException(ExceptionCode.PASSWORD_NOT_SAME);
+        if(password1.equals(password2)) throw new BusinessLogicException(ExceptionCode.PASSWORD_IS_SAME);
     }
 
     private boolean isAdmin() {
@@ -345,9 +507,4 @@ public class MemberService {
         throw new BusinessLogicException(ExceptionCode.MEMBER_UNAUTHORIZED);
     }
 
-    // 회사명 type set
-    private String setDepartmentType(String department) {
-        if(department.equals("진곡")) return "solar";
-        else return "elec";
-    }
 }

@@ -5,6 +5,7 @@ import com.thingspire.thingspire.auth.jwt.JwtTokenizer;
 import com.thingspire.thingspire.auth.dto.LoginDTO;
 import com.thingspire.thingspire.user.Member;
 import lombok.SneakyThrows;
+import org.springframework.cache.CacheManager;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -21,12 +22,21 @@ import java.util.*;
 public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilter {  // (1)
     private final AuthenticationManager authenticationManager;
     private final JwtTokenizer jwtTokenizer;
+    private final CacheManager cacheManager;
+    public static final String MEMBERS_REFRESH_TOKEN_CACHE = "refreshToken";
 
 
     // (2)
-    public JwtAuthenticationFilter(AuthenticationManager authenticationManager, JwtTokenizer jwtTokenizer) {
+//    public JwtAuthenticationFilter(AuthenticationManager authenticationManager, JwtTokenizer jwtTokenizer) {
+//        this.authenticationManager = authenticationManager;
+//        this.jwtTokenizer = jwtTokenizer;
+//    }
+
+
+    public JwtAuthenticationFilter(AuthenticationManager authenticationManager, JwtTokenizer jwtTokenizer, CacheManager cacheManager) {
         this.authenticationManager = authenticationManager;
         this.jwtTokenizer = jwtTokenizer;
+        this.cacheManager = cacheManager;
     }
 
     // (3)
@@ -41,7 +51,9 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
         UsernamePasswordAuthenticationToken authenticationToken =
                 new UsernamePasswordAuthenticationToken(loginDto.getLoginId(), loginDto.getPassword());
 
-        return authenticationManager.authenticate(authenticationToken);  // (3-4)
+        Authentication authentication = authenticationManager.authenticate(authenticationToken);  // (3-4)
+
+        return authentication;
     }
 
     // (4)
@@ -55,10 +67,15 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
         String accessToken = delegateAccessToken(member);   // (4-2)
         String refreshToken = delegateRefreshToken(member); // (4-3)
 
+        // 로그인 인증 성공시, Cache - RefreshToken 저장
+        String cacheKey = member.getMemberId().toString();
+        cacheManager.getCache(MEMBERS_REFRESH_TOKEN_CACHE).put(cacheKey, "Bearer " + refreshToken);
+
+
         response.setHeader("Authorization", "Bearer " + accessToken);  // (4-4)
         response.setHeader("memberId", String.valueOf(member.getMemberId()));
         response.setHeader("role", String.valueOf(member.getRoles()));
-        response.setHeader("Refresh", refreshToken);                   // (4-5)
+        response.setHeader("Refresh", "Bearer " + refreshToken);                   // (4-5)
         response.setHeader("departmentType",member.getDepartmentType()); // 부서타입
 
         response.setContentType("application/json");
@@ -73,16 +90,17 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
         if(member.getAuthority().equals("Admin")) {
             responseMap.put("department", null);
             responseMap.put("departmentType", null);
+            responseMap.put("factoryCode", null);
         }else{
             responseMap.put("department", member.getDepartment());
             responseMap.put("departmentType", member.getDepartmentType());
+            responseMap.put("factoryCode", member.getFactoryCode());
         }
         responseMap.put("accessToken", accessToken);
         responseMap.put("refreshToken", refreshToken);
         responseMap.put("memberId", String.valueOf(member.getMemberId()));
         responseMap.put("password", member.getPassword());
         responseMap.put("authority", member.getAuthority());
-        responseMap.put("factoryCode", member.getFactoryCode());
         responseMap.put("email", member.getEmail());
         responseMap.put("name", member.getName());
         responseMap.put("phoneNumber", member.getPhoneNumber());
@@ -98,6 +116,8 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
     // (5)
     private String delegateAccessToken(Member member) {
         Map<String, Object> claims = new HashMap<>();
+
+        claims.put("type", "access");
 
         claims.put("ID", member.getLoginId());
         claims.put("roles", member.getRoles());
@@ -123,11 +143,21 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
 
     // (6)
     private String delegateRefreshToken(Member member) {
-        String subject = member.getEmail();
+
+        Map<String, Object> claims = new HashMap<>();
+
+        claims.put("type", "refresh");
+
+        claims.put("ID", member.getLoginId());
+        claims.put("memberId", member.getMemberId());
+        claims.put("roles", member.getRoles());
+        claims.put("loginId", member.getLoginId());
+
+        String subject = member.getMemberId().toString();
         Date expiration = jwtTokenizer.getTokenExpiration(jwtTokenizer.getRefreshTokenExpirationMinutes());
         String base64EncodedSecretKey = jwtTokenizer.encodeBase64SecretKey(jwtTokenizer.getSecretKey());
 
-        String refreshToken = jwtTokenizer.generateRefreshToken(subject, expiration, base64EncodedSecretKey);
+        String refreshToken = jwtTokenizer.generateRefreshToken(claims, subject, expiration, base64EncodedSecretKey);
 
         return refreshToken;
     }

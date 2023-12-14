@@ -12,10 +12,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+import javax.servlet.http.HttpServletRequest;
+import java.io.IOException;
 import java.time.LocalDateTime;
-import java.util.Optional;
+import java.util.Arrays;
+import java.util.NoSuchElementException;
+import java.util.stream.Collectors;
+import org.springframework.web.util.ContentCachingRequestWrapper;
 
 @Aspect
 @Component
@@ -28,8 +35,10 @@ public class AuditAspect {
 
     // 로그인 이후 로그 남기기
     // 메서드가 성공적으로 실행되고 결괏값을 반환한 후 적용할 어드바이스
+
     @AfterReturning("@annotation(Loggable)")
     public void logActivity(JoinPoint joinPoint) {
+
         String methodName = joinPoint.getSignature().getName();
         String className = joinPoint.getTarget().getClass().getName();
         String fullMethodName = className + "." + methodName;
@@ -45,25 +54,29 @@ public class AuditAspect {
 
         Member member;
         Audit audit = new Audit();
+
         // 만약 로그인이 필요하지 않은 요청이라면
         if (!authentication.isAuthenticated() || authentication instanceof AnonymousAuthenticationToken) {
+
             Object[] args = joinPoint.getArgs();
 
-            // 만약 resetPassword 메서드의 JointPoint라면
+            // 만약 resetPassword 메서드의 JointPoint라면(비밀번호 초기화)
             if (args != null && args.length > 0 && args[0] instanceof MemberDTO.ResetPassword) {
                 MemberDTO.ResetPassword memberResetPasswordDTO = (MemberDTO.ResetPassword) args[0];
                 // DTO 정보를 가져와 Audit 테이블에 저장하는 로직을 여기에 작성합니다.
-                audit.setLoginId(memberResetPasswordDTO.getLoginId());
-                audit.setName(memberRepository.findByEmail(memberResetPasswordDTO.getEmail()).orElseThrow(null).getName());
+                //audit.setLoginId(memberResetPasswordDTO.getLoginId());
+                //Member findMember = memberRepository.findByLoginId(memberResetPasswordDTO.getLoginId()).orElse(null);
+                //audit.setName(findMember.getName());
+                //audit.setName(memberResetPasswordDTO.getLoginId());
+
             }else{ // 기타 다른 요청
                 audit.setLoginId("비로그인 사용자");
                 audit.setName("비로그인 사용자");
             }
-        }else{
+        }else{ // 로그인이 필요한 요청
             member = memberRepository.findByLoginId(authentication.getName()).orElseThrow(()-> new BusinessLogicException(ExceptionCode.MEMBER_UNAUTHORIZED));
             audit.setLoginId(member.getLoginId());
             audit.setName(member.getName());
-
         }
         // 실행 메서드 명
         audit.setActivityType(detailedInfo[0]);
@@ -78,7 +91,8 @@ public class AuditAspect {
 
     // 실패 로그 남기기
     // 대상 메서드에서 예외가 발생했을 때 적용할 어드바이스로 try/catch문에서의 catch와 비슷한 역할
-    @AfterThrowing(pointcut = "@annotation(Loggable)", throwing = "ex")
+
+    @AfterThrowing(pointcut = "@annotation(ErrorLoggable)", throwing = "ex")
     public void logAfterThrowing(JoinPoint joinPoint, Throwable  ex) {
         String methodName = joinPoint.getSignature().getName();
         String className = joinPoint.getTarget().getClass().getName();
@@ -100,28 +114,40 @@ public class AuditAspect {
         // 만약 로그인을 하지 않는 요청이라면
         if (!authentication.isAuthenticated() || authentication instanceof AnonymousAuthenticationToken) {
 
-            Object[] args = joinPoint.getArgs();
+            Object[] args = joinPoint.getArgs(); // 현재 실행 중인 메서드에 전달된 인자(매개변수) 배열 반환 메서드
 
-            // 만약 resetPassword 메서드의 JointPoint라면
-            if (args != null && args.length > 0 && args[0] instanceof MemberDTO.ResetPassword) {
-                MemberDTO.ResetPassword memberResetPasswordDTO = (MemberDTO.ResetPassword) args[0];
-                // DTO 정보를 가져와 Audit 테이블에 저장하는 로직을 여기에 작성합니다 :: 📝고민중
-
-//                audit.setLoginId(memberRepository.findById(memberResetPasswordDTO.getMemberId()).orElse(null).getLoginId());
-//                audit.setName(memberRepository.findById(memberResetPasswordDTO.getMemberId()).orElse(null).getName());
-                audit.setLoginId(memberResetPasswordDTO.getLoginId());
-                audit.setName(memberResetPasswordDTO.getEmail());
-            }else{
+            // 만약 resetPassword 메서드가 수행된거라면
+            if (methodName.contains("resetPasswordOnlyMemberId")) {
+                audit.setLoginId("관리자");
+                audit.setName("관리자");
+            }else {
                 audit.setLoginId("비로그인 사용자");
                 audit.setName("비로그인 사용자");
             }
+            // 그 외의 경우? 는 잘 모르겠다.
+            // ErrorLoggable 붙은 애 중에 아닌 애 찾아볼 것.
+
+
+//            if (args != null && args.length > 0 && args[0] instanceof MemberDTO.ResetPassword) {
+//                MemberDTO.ResetPassword memberResetPasswordDTO = (MemberDTO.ResetPassword) args[0];
+//                // DTO 정보를 가져와 Audit 테이블에 저장하는 로직을 여기에 작성합니다 :: 📝고민중
+//
+////                audit.setLoginId(memberRepository.findById(memberResetPasswordDTO.getMemberId()).orElse(null).getLoginId());
+////                audit.setName(memberRepository.findById(memberResetPasswordDTO.getMemberId()).orElse(null).getName());
+//                //audit.setLoginId(memberResetPasswordDTO.getLoginId());
+//                //audit.setName(memberResetPasswordDTO.getLoginId());
+
         }
+
         // 로그인을 받는 요청이라면
-        else{
-            member = memberRepository.findByLoginId(authentication.getName()).orElse(null);
-            audit.setLoginId(member.getLoginId());
-            audit.setName(member.getName());
+        else {
+            member = memberRepository.findByLoginId(authentication.getName()).orElseGet(()->{
+                return null;
+            });
+            audit.setLoginId(member != null ? member.getLoginId():null);
+            audit.setName(member != null?member.getName():null);
         }
+
         // 실행 메서드 명
         audit.setActivityType(detailedInfo[0]);
         audit.setDetail(detailedInfo[1]);
@@ -161,6 +187,16 @@ public class AuditAspect {
         // 그 외 경우
         else {
             return "알 수 없는 활동/알 수 없는 활동";
+        }
+    }
+
+    private String extractRequestBody(HttpServletRequest request) {
+        try {
+            return request.getReader().lines().collect(Collectors.joining(System.lineSeparator()));
+        } catch (IOException e) {
+            // requestBody 추출 실패 시 예외 처리
+            log.error("Failed to extract requestBody: {}", e.getMessage());
+            return null;
         }
     }
 }
